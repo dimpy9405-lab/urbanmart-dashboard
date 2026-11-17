@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UrbanMart | Business Intelligence Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+:root{--bg:#f4f7fb;--card:#fff;--ink:#17243a;--muted:#718096;--blue:#3157d5;--teal:#13a89e;--line:#e7edf5}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:Inter,Segoe UI,Arial,sans-serif;color:var(--ink)}
+header{background:linear-gradient(115deg,#142d59,#3157d5);color:#fff;padding:28px max(22px,calc((100% - 1200px)/2))}
+header h1{margin:0 0 7px;font-size:clamp(24px,4vw,34px)}header p{margin:0;color:#dce6ff}
+main{max-width:1200px;margin:24px auto;padding:0 18px 36px}
+.toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:end;background:var(--card);padding:16px;border:1px solid var(--line);border-radius:14px;margin-bottom:18px}
+label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted);font-weight:700}
+select{min-width:160px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:14px}
+button{padding:10px 14px;border:0;border-radius:8px;background:#eaf0ff;color:var(--blue);font-weight:700;cursor:pointer}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 3px 12px #1c31500a}
+.kpi .name{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.kpi .value{font-size:clamp(20px,3vw,28px);font-weight:800;margin-top:10px}
+.kpi .hint{font-size:12px;color:var(--muted);margin-top:5px}
+.charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.chart-card h2{font-size:16px;margin:0 0 16px}.canvas-wrap{height:270px;position:relative}
+.table-card{margin-top:16px;overflow:auto}.table-card h2{font-size:16px;margin:0 0 12px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:11px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--muted);font-size:11px;text-transform:uppercase}
+.note{font-size:12px;color:var(--muted);line-height:1.5;margin:16px 2px}
+.status{font-size:12px;color:var(--muted);margin-left:auto}
+@media(max-width:800px){.kpis{grid-template-columns:repeat(2,1fr)}.charts{grid-template-columns:1fr}}
+@media(max-width:430px){.kpis{grid-template-columns:1fr 1fr}.kpi{padding:13px}.value{font-size:20px}}
+</style></head>
+<body>
+<header><h1>UrbanMart Business Intelligence</h1><p>Sales, customers, delivery experience and returns · January–September 2024</p></header>
+<main>
+<section class="toolbar">
+<label>Product category<select id="category"><option value="All">All categories</option></select></label>
+<label>Customer segment<select id="segment"><option value="All">All segments</option></select></label>
+<label>Month<select id="month"><option value="All">All months</option></select></label>
+<button id="reset">Reset filters</button><span class="status" id="status">Loading dataset…</span>
+</section>
+<section class="kpis">
+<div class="card kpi"><div class="name">Total revenue</div><div class="value" id="revenue">—</div><div class="hint">INR</div></div>
+<div class="card kpi"><div class="name">Transactions</div><div class="value" id="transactions">—</div><div class="hint">Filtered orders</div></div>
+<div class="card kpi"><div class="name">Top category</div><div class="value" id="topCategory">—</div><div class="hint">By revenue</div></div>
+<div class="card kpi"><div class="name">Repeat purchase rate</div><div class="value" id="repeatRate">—</div><div class="hint">Share of transactions marked repeat</div></div>
+</section>
+<section class="charts">
+<div class="card chart-card"><h2>Monthly revenue trend</h2><div class="canvas-wrap"><canvas id="monthlyChart"></canvas></div></div>
+<div class="card chart-card"><h2>Revenue by product category</h2><div class="canvas-wrap"><canvas id="categoryChart"></canvas></div></div>
+<div class="card chart-card"><h2>Repeat purchase rate by segment</h2><div class="canvas-wrap"><canvas id="repeatChart"></canvas></div></div>
+<div class="card chart-card"><h2>Delivery days vs customer rating</h2><div class="canvas-wrap"><canvas id="deliveryChart"></canvas></div></div>
+<div class="card chart-card"><h2>Return rate by product category</h2><div class="canvas-wrap"><canvas id="returnChart"></canvas></div></div>
+<div class="card chart-card"><h2>Customer segment revenue</h2><div class="canvas-wrap"><canvas id="segmentChart"></canvas></div></div>
+</section>
+<section class="card table-card"><h2>Category performance summary</h2><table><thead><tr><th>Category</th><th>Transactions</th><th>Revenue (₹)</th><th>Returns</th><th>Return rate</th></tr></thead><tbody id="categoryTable"></tbody></table></section>
+<p class="note">Source: supplied UrbanMart_Transactions_1200_Rows.xlsx. Filters update all dashboard metrics and charts. This is an educational dataset; refer to the assignment report for the dataset guide and interpretation notes.</p>
+</main>
+<script>
+let allRows=[], charts={};
+const money=n=>'₹'+Number(n).toLocaleString('en-IN',{maximumFractionDigits:0});
+const pct=n=>(n*100).toFixed(1)+'%';
+const sum=(a,fn)=>a.reduce((s,x)=>s+fn(x),0);
+const group=(rows,key)=>rows.reduce((o,r)=>((o[r[key]]??=[]).push(r),o),{});
+function makeChart(id,type,labels,values,label,color='#3157d5'){
+ if(charts[id]) charts[id].destroy();
+ charts[id]=new Chart(document.getElementById(id),{type,data:{labels,datasets:[{label,data:values,backgroundColor:color,borderColor:color,borderWidth:2,tension:.3,fill:type==='line'?false:undefined}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,grid:{color:'#edf1f7'}},x:{grid:{display:false}}}}});
+}
+function refresh(){
+ const cat=document.getElementById('category').value, seg=document.getElementById('segment').value, mon=document.getElementById('month').value;
+ const rows=allRows.filter(r=>(cat==='All'||r.Product_Category===cat)&&(seg==='All'||r.Customer_Segment===seg)&&(mon==='All'||r.Date.slice(0,7)===mon));
+ const revenue=sum(rows,r=>Number(r['Revenue_(INR)']||0)), repeat=rows.filter(r=>r.Repeat_Purchase==='Yes').length;
+ document.getElementById('revenue').textContent=money(revenue);
+ document.getElementById('transactions').textContent=rows.length.toLocaleString('en-IN');
+ const cats=group(rows,'Product_Category'), catRows=Object.entries(cats).map(([name,a])=>({name,rev:sum(a,r=>+r['Revenue_(INR)']),returns:a.filter(r=>r.Return_Flag==='Yes').length,count:a.length}));
+ catRows.sort((a,b)=>b.rev-a.rev);
+ document.getElementById('topCategory').textContent=catRows[0]?.name||'—';
+ document.getElementById('repeatRate').textContent=rows.length?pct(repeat/rows.length):'0%';
+ const months=group(rows,'_month'); const monthKeys=Object.keys(months).sort();
+ makeChart('monthlyChart','line',monthKeys.map(x=>new Date(x+'-02').toLocaleString('en-US',{month:'short',year:'2-digit'})),monthKeys.map(x=>sum(months[x],r=>+r['Revenue_(INR)'])),'Revenue');
+ makeChart('categoryChart','bar',catRows.map(x=>x.name),catRows.map(x=>x.rev),'Revenue','#13a89e');
+ const segments=group(rows,'Customer_Segment'), segKeys=Object.keys(segments);
+ makeChart('repeatChart','bar',segKeys,segKeys.map(k=>segments[k].filter(r=>r.Repeat_Purchase==='Yes').length/segments[k].length*100),'Repeat rate (%)','#8b6bd6');
+ const scatter=rows.map(r=>({x:+r.Delivery_Days,y:+r.Customer_Rating}));
+ if(charts.deliveryChart) charts.deliveryChart.destroy();
+ charts.deliveryChart=new Chart(document.getElementById('deliveryChart'),{type:'scatter',data:{datasets:[{data:scatter,backgroundColor:'#13a89e88',pointRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{title:{display:true,text:'Delivery days'},beginAtZero:true},y:{title:{display:true,text:'Customer rating'},min:0,max:5}}}});
+ makeChart('returnChart','bar',catRows.map(x=>x.name),catRows.map(x=>x.count?x.returns/x.count*100:0),'Return rate (%)','#e08a4b');
+ makeChart('segmentChart','bar',segKeys,segKeys.map(k=>sum(segments[k],r=>+r['Revenue_(INR)'])),'Revenue','#4d82c8');
+ document.getElementById('categoryTable').innerHTML=catRows.map(x=>`<tr><td>${x.name}</td><td>${x.count}</td><td>${money(x.rev)}</td><td>${x.returns}</td><td>${pct(x.count?x.returns/x.count:0)}</td></tr>`).join('');
+ document.getElementById('status').textContent=`Showing ${rows.length.toLocaleString('en-IN')} of ${allRows.length.toLocaleString('en-IN')} transactions`;
+}
+fetch('./transactions.json').then(r=>{if(!r.ok)throw Error('Could not load transactions.json');return r.json()}).then(data=>{
+ allRows=data.map(r=>({...r,_month:r.Date.slice(0,7)}));
+ const fill=(id,vals)=>vals.sort().forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=id==='month'?new Date(v+'-02').toLocaleString('en-US',{month:'long',year:'numeric'}):v;document.getElementById(id).appendChild(o)});
+ fill('category',[...new Set(allRows.map(r=>r.Product_Category))]);fill('segment',[...new Set(allRows.map(r=>r.Customer_Segment))]);fill('month',[...new Set(allRows.map(r=>r._month))]);
+ ['category','segment','month'].forEach(id=>document.getElementById(id).addEventListener('change',refresh));
+ document.getElementById('reset').addEventListener('click',()=>{['category','segment','month'].forEach(id=>document.getElementById(id).value='All');refresh()});
+ refresh();
+}).catch(e=>{document.getElementById('status').textContent='Dataset load error: '+e.message;});
+</script></body></html>
